@@ -1,67 +1,49 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
-import { search } from './utils/search';
-import { matchSearchPhrase } from './utils/matchSearchPhrase';
+import { search } from "./utils/search";
+import { matchSearchPhrase } from "./utils/matchSearchPhrase";
 
-export function activate(context: vscode.ExtensionContext) {
-	const disposable = vscode.commands.registerCommand(
-		'extension.captain-stack-settings',
-		() => {
-			vscode.window.showInformationMessage('Show settings');
-		}
-	);
+export function activate(_: vscode.ExtensionContext) {
+  const provider: vscode.CompletionItemProvider = {
+    // @ts-ignore
+    provideInlineCompletionItems: async (document, position, context, token) => {
+    // provideCompletionItems: async (document, position, context, token) => {
+      const textBeforeCursor = document.getText(
+        new vscode.Range(position.with(undefined, 0), position)
+      );
 
-	context.subscriptions.push(disposable);
+      const match = matchSearchPhrase(textBeforeCursor);
+      let items: any[] = [];
 
-	interface CustomInlineCompletionItem extends vscode.InlineCompletionItem {
-		trackingId: string;
-	}
+      if (match) {
+        let rs;
+        try {
+          rs = await search(match.searchPhrase);
+          if (rs) {
+            items = rs.results.map((item) => {
+              const output = `\n${match.commentSyntax} Source: ${item.sourceURL} ${match.searchPhrase}\n${item.code}`;
+              return {
+                text: output,
+                insertText: output,
+                range: new vscode.Range(
+                  position.translate(0, output.length),
+                  position
+                ),
+              };
+            });
+          }
+        } catch (err: any) {
+          vscode.window.showErrorMessage(err.toString());
+        }
+      }
+      return { items };
+    },
+  };
 
-	const provider: vscode.InlineCompletionItemProvider<CustomInlineCompletionItem> = {
-		provideInlineCompletionItems: async (document, position, context, token) => {
-			const textBeforeCursor = document.getText(
-				new vscode.Range(position.with(undefined, 0), position)
-			);
-
-			const match = matchSearchPhrase(textBeforeCursor);
-
-			if (match) {
-
-				let rs;
-
-				try {
-					rs = await search(match.searchPhrase);
-				} catch (err) {
-					vscode.window.showErrorMessage(err.toString());
-					return { items: [] };
-				}
-
-
-				if (rs == null) {
-					return { items: [] };
-				}
-
-				const items = new Array<CustomInlineCompletionItem>();
-
-				rs.results.forEach((item, i) => {
-
-					const output = `\n${match.commentSyntax} Source: https://stackoverflow.com${item.sourceURL} ${match.commentSyntaxEnd}\n${item.code}`;
-					items.push({
-						text: output,
-						range: new vscode.Range(position.translate(0, output.length), position),
-						trackingId: `snippet-${i}`,
-					});
-				});
-				return { items };
-			}
-			return { items: [] };
-		},
-	};
-
-	vscode.languages.registerInlineCompletionItemProvider({ pattern: "**" }, provider);
-
-	// Be aware that the API around `getInlineCompletionItemController` will not be finalized as is!
-	vscode.window.getInlineCompletionItemController(provider).onDidShowCompletionItem(e => {
-		const id = e.completionItem.trackingId;
-	});
+  // @ts-ignore
+  vscode.languages.registerInlineCompletionItemProvider({ pattern: "**" }, provider);
 }
+
+const startChars = ["<!--", "#", "//", "/*"];
+const keywords = ["find", "generate"];
+const triggerKeywords = startChars.map(s => keywords.map(k => [`${s} ${k}`, `${s}${k}`])).flat(2);
